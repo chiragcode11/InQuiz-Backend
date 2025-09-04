@@ -1,7 +1,7 @@
 import google.generativeai as genai
 import os
 from typing import List, Dict, Any
-from models import Question, QuestionType, DifficultyLevel, Resume
+from .models import Question, QuestionType, DifficultyLevel, Resume
 import json
 import re
 
