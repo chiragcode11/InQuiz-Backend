@@ -1,7 +1,7 @@
 import asyncio
 from typing import Dict, List
-from ai_service import ai_generator, response_analyzer, conversation_manager
-from database import get_database
+from .ai_service import ai_generator, response_analyzer, conversation_manager
+from .database import get_database
 from bson import ObjectId
 
 db = get_database()
