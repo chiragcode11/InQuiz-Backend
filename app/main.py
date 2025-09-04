@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import router
-from database import close_database_connection
+from .routes import router
+from .database import close_database_connection
 import uvicorn
 
 app = FastAPI(title="AI Interviewer API", version="1.0.0")
