@@ -8,7 +8,7 @@ app = FastAPI(title="AI Interviewer API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://in-quiz-frontend.vercel.app/"],
+    allow_origins=["https://in-quiz-frontend.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
