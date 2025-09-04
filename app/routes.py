@@ -6,10 +6,10 @@ import io
 from datetime import datetime
 from bson import ObjectId
 
-from database import get_database
-from models import *
-from ai_service import ai_generator, response_analyzer
-from voice_service import voice_manager
+from .database import get_database
+from .models import *
+from .ai_service import ai_generator, response_analyzer
+from .voice_service import voice_manager
 
 router = APIRouter()
 db = get_database()
