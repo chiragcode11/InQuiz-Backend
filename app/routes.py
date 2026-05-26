@@ -299,6 +299,7 @@ async def complete_voice_interview(interview_id: str):
 
 @router.get("/elevenlabs/signed-url")
 async def get_elevenlabs_signed_url():
+    load_dotenv(override=True)
     agent_id = os.getenv("ELEVENLABS_AGENT_ID")
     api_key = os.getenv("ELEVENLABS_API_KEY")
     
@@ -433,14 +434,16 @@ async def elevenlabs_chat_completions(request: Request):
         user_messages = [msg for msg in messages if msg.get("role") == "user"]
         last_user_message = user_messages[-1].get("content", "").strip() if user_messages else ""
         
-        if not assistant_messages:
+        # If the user has not spoken yet, this is the start of the session.
+        # The agent is already speaking the firstMessage override from the client side.
+        # Return an empty response to avoid pre-empting or truncating the playing audio.
+        if not user_messages:
             db.interviews.update_one(
                 {"_id": ObjectId(interview_id)},
                 {"$set": {"status": "in_progress", "started_at": datetime.utcnow()}}
             )
-            response_text = f"Hello! Welcome to your interview. Let's begin. Here is your first question: {current_question_text}"
             return StreamingResponse(
-                event_generator(response_text),
+                event_generator(""),
                 media_type="text/event-stream"
             )
             
