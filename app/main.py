@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+load_dotenv()
+
 from .routes import router
 from .database import close_database_connection
 import uvicorn
@@ -8,7 +11,7 @@ app = FastAPI(title="AI Interviewer API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://in-quiz-frontend.vercel.app"],
+    allow_origins=["https://in-quiz-frontend.vercel.app", "http://localhost:3000", "http://localhost:3000/"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

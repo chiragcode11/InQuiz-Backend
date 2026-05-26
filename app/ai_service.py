@@ -170,6 +170,67 @@ class AIQuestionGenerator:
             return questions
         except Exception as e:
             return self._fallback_experience_questions(experiences, difficulty)
+
+    async def adapt_next_question(self, next_question: Dict, last_user_response: str, conversation_history: List[Dict], resume_data: Dict) -> Dict:
+        """
+        Rewrite the next question template to blend in a smooth conversational transition
+        based on the candidate's last answer, simulating real-world interviews.
+        """
+        recent_context = conversation_history[-4:] if len(conversation_history) > 4 else conversation_history
+        context_text = "\n".join([f"{msg.get('type', 'message')}: {msg.get('text', '')}" for msg in recent_context])
+        
+        prompt = f"""
+        You are an elite corporate technical and behavioral interviewer. You are transitioning the candidate to the next question.
+        
+        Last Candidate Response: "{last_user_response}"
+        Next Question Template: "{next_question.get('question_text', '')}"
+        Next Question Type: "{next_question.get('question_type', '')}"
+        Next Question Difficulty: "{next_question.get('difficulty', '')}"
+        Candidate Resume Skills: {', '.join(resume_data.get('skills', []))}
+        
+        Recent Dialogue History:
+        {context_text}
+        
+        Your Goal:
+        Rewrite the "Next Question Template" to create a highly professional, adaptive next question.
+        1. Start with a natural, brief conversational transition acknowledging the candidate's last answer/points. (Do not say "Excellent job" or sound robotic; make it organic like a human interviewer. e.g. "That makes sense, especially regarding how you handle concurrency. Pivoting a bit...")
+        2. Introduce the core topic of the Next Question Template. You may slightly tailor the context of the question to match the candidate's resume skills if it makes the question more relevant.
+        3. Do NOT change the target difficulty or the core concept of the original question.
+        4. Keep the question concise and clear (maximum 2-3 sentences).
+        5. CRITICAL CONSTRAINT: If the candidate's last response was off-topic, unrelated, or skipped, do NOT attempt to connect it to the next question. Instead, use a standard transition like "Moving on to the next question..." and ask the next question exactly as templated, without any tailoring to the off-topic subject.
+        6. CRITICAL CONSTRAINT: The rewritten question MUST be a professional interview question focusing entirely on the technical or behavioral topic of the "Next Question Template". Never ask about non-professional, general knowledge, or off-topic subjects.
+        
+        Return response in this JSON format:
+        {{
+            "question_text": "The rewritten question text with transition",
+            "expected_answer_points": ["point1", "point2", "point3"]
+        }}
+        """
+        try:
+            response = self.model.generate_content(prompt)
+            data = self._parse_single_json_response(response.text)
+            if data and data.get("question_text"):
+                return {
+                    "question_text": data["question_text"],
+                    "expected_answer_points": data.get("expected_answer_points", next_question.get("expected_answer_points", []))
+                }
+        except Exception as e:
+            print(f"Error adapting next question: {e}")
+        
+        return {
+            "question_text": next_question.get("question_text", ""),
+            "expected_answer_points": next_question.get("expected_answer_points", [])
+        }
+
+    def _parse_single_json_response(self, response_text: str) -> Dict:
+        try:
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+                return json.loads(json_str)
+            return {}
+        except:
+            return {}
     
     def _parse_json_response(self, response_text: str) -> List[Dict]:
         try:
@@ -277,7 +338,52 @@ class ConversationManager:
         """
         user_input_lower = user_input.lower().strip()
         
-        # Handle specific user requests first - HIGHEST PRIORITY
+        # 1. Handle confirmation of early termination first
+        is_confirming_end = False
+        if conversation_history:
+            for msg in reversed(conversation_history):
+                msg_type = msg.get("type", "").lower()
+                msg_text = msg.get("text", "").lower()
+                if ("ai" in msg_type or "assistant" in msg_type) and "are you sure you want to end the interview early" in msg_text:
+                    is_confirming_end = True
+                    break
+        
+        if is_confirming_end:
+            if any(phrase in user_input_lower for phrase in ['yes', 'yep', 'yeah', 'sure', 'confirm', 'end', 'stop', 'correct', 'do it']):
+                return {
+                    "action": "end_interview_confirmed",
+                    "response": "Alright, I understand. I will end our session now and save your progress. Thank you for your time, and you'll receive your feedback shortly.",
+                    "continue_listening": False,
+                    "needs_follow_up": False
+                }
+            else:
+                return {
+                    "action": "continue_after_declining_end",
+                    "response": "No problem! Let's continue with our interview. To recap, here was the question: " + current_question,
+                    "continue_listening": True,
+                    "needs_follow_up": False
+                }
+        
+        # 2. Check for early termination trigger
+        if any(phrase in user_input_lower for phrase in ['end the interview', 'stop the interview', 'terminate', 'quit', 'finish early', 'leave the interview', 'stop now', 'can we end', 'i want to end', 'exit interview']):
+            return {
+                "action": "confirm_end_interview",
+                "response": "Are you sure you want to end the interview early? If you end now, I will save your responses and generate feedback based on what we've completed so far. Please say 'Yes, end the interview' to confirm, or 'No' to continue.",
+                "continue_listening": True,
+                "needs_follow_up": False
+            }
+
+        # 3. Check for hint request
+        if any(phrase in user_input_lower for phrase in ['hint', 'give me a hint', 'clue', 'help me with this', 'stuck', 'give me a clue', 'any tips']):
+            hint = await self._provide_hint(current_question, question_context)
+            return {
+                "action": "provide_hint",
+                "response": hint,
+                "continue_listening": True,
+                "needs_follow_up": False
+            }
+
+        # 4. Handle other conversational helpers - HIGHEST PRIORITY
         if any(phrase in user_input_lower for phrase in ['repeat', 'again', 'say that again', 'repeat question', 'what was the question', 'can you repeat']):
             return {
                 "action": "repeat_question",
@@ -330,6 +436,26 @@ class ConversationManager:
         
         return await self._analyze_answer_intelligently(user_input, current_question, conversation_history, question_context)
     
+    async def _provide_hint(self, question: str, question_context: Dict = None) -> str:
+        expected_info = ""
+        if question_context and question_context.get("expected_answer_points"):
+            expected_info = f"Expected Points: {', '.join(question_context.get('expected_answer_points', []))}"
+            
+        prompt = f"""
+        A candidate is stuck on this interview question: "{question}"
+        {expected_info}
+        
+        Provide a helpful, subtle hint that:
+        1. Points the candidate in the right direction without giving away the complete answer.
+        2. Encourages them to explain their thinking.
+        3. Is concise (1-2 sentences).
+        """
+        try:
+            response = self.model.generate_content(prompt)
+            return response.text.strip()
+        except Exception as e:
+            return "Try to think about the core concepts involved, or walk me through your initial thoughts and we can build from there."
+
     async def _clarify_question(self, question: str, question_context: Dict = None) -> str:
         context_info = ""
         if question_context:
@@ -414,9 +540,12 @@ class ConversationManager:
             "next_action": "continue_listening|move_to_next_question"
         }}
 
-        AI Response Guidelines:
+        AI Response Guidelines & Strict Context Constraints:
+        - CRITICAL CONSTRAINT: Under no circumstances should you engage in chit-chat, talk about unrelated topics (such as food/cooking, recipes, sports, hobbies, movies, weather, etc.), or answer unrelated questions.
+        - OFF-TOPIC DEFINITION: Any response that does not attempt to answer the current interview question or talks about unrelated concepts (e.g., food/cooking, sports, hobbies, personal chit-chat, asking the interviewer personal/philosophical questions) is strictly OFF-TOPIC.
+        - If the candidate's answer is OFF-TOPIC: You must set "action" to "redirect_off_topic", set "response_quality" to "off_topic", set "needs_follow_up" to true, and set "ai_response" to a polite but firm redirection back to the active interview question. e.g., "I see. Let's make sure we stay focused on our interview topic. To get back on track, let me repeat the question: [repeat question]"
+        - Keep all follow-up questions strictly scoped to the active interview question's technical/behavioral domain. Do not deviate to any unrelated topics.
         - If answer is WRONG or POOR: Provide gentle correction, explain the right approach, then ask a clarifying question
-        - If answer is OFF-TOPIC: Redirect gently back to the question
         - If answer is INCOMPLETE: Ask for more details or examples
         - If answer is GOOD/EXCELLENT: Acknowledge strengths and move forward
         - Be conversational and natural, like a real interviewer

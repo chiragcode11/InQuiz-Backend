@@ -86,3 +86,11 @@ class InterviewConfig(BaseModel):
     duration_minutes: int = 20
     question_types: List[QuestionType] = [QuestionType.TECHNICAL, QuestionType.BEHAVIORAL]
     num_questions: int = 5
+
+class ElevenLabsMessage(BaseModel):
+    role: str
+    content: str
+
+class ElevenLabsChatRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    messages: List[ElevenLabsMessage]
